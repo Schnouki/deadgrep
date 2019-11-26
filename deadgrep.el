@@ -360,7 +360,8 @@ with Emacs text properties."
   'action #'deadgrep--search-term
   'help-echo "Change search term")
 
-(defun deadgrep--search-term (_button)
+(defun deadgrep--search-term (&optional button)
+  (interactive)
   (setq deadgrep--search-term
         ;; TODO: say string or regexp
         (read-from-minibuffer
@@ -379,6 +380,12 @@ with Emacs text properties."
   (setq deadgrep--search-type (button-get button 'search-type))
   (deadgrep-restart))
 
+(defun deadgrep--search-type-setter (value)
+  (lambda ()
+    (interactive)
+    (setq deadgrep--search-type value)
+    (deadgrep-restart)))
+
 (define-button-type 'deadgrep-case
   'action #'deadgrep--case
   'case nil
@@ -388,29 +395,42 @@ with Emacs text properties."
   (setq deadgrep--search-case (button-get button 'case))
   (deadgrep-restart))
 
+(defun deadgrep--case-setter (value)
+  (lambda ()
+    (inteactive)
+    (setq deadgrep--search-case value)
+    (deadgrep-restart)))
+
 (define-button-type 'deadgrep-context
   'action #'deadgrep--context
   'context nil
   'help-echo "Show/hide context around match")
 
-(defun deadgrep--context (button)
+(defun deadgrep--context-ask-value (context)
   ;; deadgrep--context takes the value of (before . after) when set.
-  (setq deadgrep--context
-        (cl-case (button-get button 'context)
-          ((nil)
-           nil)
-          (before
-           (cons
-            (read-number "Show N lines before: ")
-            (or (cdr-safe deadgrep--context) 0)))
-          (after
-           (cons
-            (or (car-safe deadgrep--context) 0)
-            (read-number "Show N lines after: ")))
-          (t
-           (error "Unknown context type"))))
+  (cl-case context
+    ((nil) nil)
+    (before
+      (cons
+       (read-number "Show N lines before: ")
+       (or (cdr-safe deadgrep--context) 0)))
+    (after
+     (cons
+      (or (car-safe deadgrep--context) 0)
+      (read-number "Show N lines after: ")))
+    (t
+     (error "Unknown context type"))))
 
+(defun deadgrep--context (button)
+  (setq deadgrep--context
+	(deadgrep--context-ask-value (button-get button 'context)))
   (deadgrep-restart))
+
+(defun deadgrep--context-setter (value)
+  (lambda ()
+    (interactive)
+    (setq deadgrep--context (deadgrep--context-ask-value value))
+    (deadgrep-restart)))
 
 (defun deadgrep--type-list ()
   "Query the rg executable for available file types."
@@ -537,42 +557,51 @@ with Emacs text properties."
            "File type: " type-choices nil t nil nil default)))
     (nth 1 (assoc chosen type-choices))))
 
+(defun deadgrep--file-type-ask (file-type)
+  (cl-case file-type
+    ('all 'all)
+    ('type
+     (let ((new-file-type
+	    (deadgrep--read-file-type deadgrep--initial-filename)))
+       (cons 'type new-file-type)))
+    ('glob
+     (let ((glob
+	    (read-from-minibuffer
+	     "Glob: "
+	     (cond
+	      ;; If we already have a glob pattern, edit it.
+	      ((eq (car-safe deadgrep--file-type) 'glob)
+	       (cdr deadgrep--file-type))
+	      ;; If the initial file had a file name of the form
+	      ;; foo.bar, offer *.bar as the initial glob.
+	      ((and deadgrep--initial-filename
+		    (file-name-extension deadgrep--initial-filename))
+	       (format "*.%s"
+		       (file-name-extension deadgrep--initial-filename)))
+	      (t
+	       "*")))))
+       (cons 'glob glob)))
+    (t
+     (error "Unknown button type: %S" button-type))))
+
 (defun deadgrep--file-type (button)
-  (let ((button-type (button-get button 'file-type)))
-    (cond
-     ((eq button-type 'all)
-      (setq deadgrep--file-type 'all))
-     ((eq button-type 'type)
-      (let ((new-file-type
-             (deadgrep--read-file-type deadgrep--initial-filename)))
-        (setq deadgrep--file-type (cons 'type new-file-type))))
-     ((eq button-type 'glob)
-      (let ((glob
-             (read-from-minibuffer
-              "Glob: "
-              (cond
-               ;; If we already have a glob pattern, edit it.
-               ((eq (car-safe deadgrep--file-type) 'glob)
-                (cdr deadgrep--file-type))
-               ;; If the initial file had a file name of the form
-               ;; foo.bar, offer *.bar as the initial glob.
-               ((and deadgrep--initial-filename
-                     (file-name-extension deadgrep--initial-filename))
-                (format "*.%s"
-                        (file-name-extension deadgrep--initial-filename)))
-               (t
-                "*")))))
-        (setq deadgrep--file-type (cons 'glob glob))))
-     (t
-      (error "Unknown button type: %S" button-type))))
+  (setq deadgrep--file-type
+	(deadgrep--file-type-ask (button-get button 'file-type)))
   (deadgrep-restart))
+
+(defun deadgrep--file-type-setter (value)
+  (lambda ()
+    (interactive)
+    (setq deadgrep--file-type (deadgrep--file-type-ask value))
+    (deadgrep-restart)))
 
 (define-button-type 'deadgrep-directory
   'action #'deadgrep--directory
   'help-echo "Change base directory")
 
-(defun deadgrep--directory (_button)
+(defun deadgrep--directory (&optional button)
   "Prompt the user for a new search directory, then restart the search."
+  (interactive)
   (setq default-directory
         (expand-file-name
          (read-directory-name "Search files in: ")))
@@ -870,6 +899,21 @@ Returns a list ordered by the most recently accessed."
     (define-key map (kbd "P") #'deadgrep-backward-match)
     (define-key map (kbd "M-n") #'deadgrep-forward-filename)
     (define-key map (kbd "M-p") #'deadgrep-backward-filename)
+
+    (define-key map (kbd "d") #'deadgrep--directory)
+    (define-key map (kbd "t") #'deadgrep--search-term)
+    (define-key map (kbd "y s") (deadgrep--search-type-setter 'string))
+    (define-key map (kbd "y w") (deadgrep--search-type-setter 'words))
+    (define-key map (kbd "y r") (deadgrep--search-type-setter 'regexp))
+    (define-key map (kbd "C s") (deadgrep--case-setter 'smart))
+    (define-key map (kbd "C e") (deadgrep--case-setter 'sensitive))
+    (define-key map (kbd "C i") (deadgrep--case-setter 'ignore))
+    (define-key map (kbd "c n") (deadgrep--context-setter nil))
+    (define-key map (kbd "c b") (deadgrep--context-setter 'before))
+    (define-key map (kbd "c a") (deadgrep--context-setter 'after))
+    (define-key map (kbd "f a") (deadgrep--file-type-setter 'all))
+    (define-key map (kbd "f t") (deadgrep--file-type-setter 'type))
+    (define-key map (kbd "f g") (deadgrep--file-type-setter 'glob))
 
     map)
   "Keymap for `deadgrep-mode'.")
