@@ -334,6 +334,17 @@ highlighting which parts matched the user's search term.")
   "Extract the portion of a line found by ripgrep that matches the user's input.
 This may occur multiple times in one line.")
 
+(defmacro deadgrep--define-setter (name target value-form)
+  "Define a setter function to set `target' to `value-form'."
+  (declare (indent defun))
+  (let ((full-name (intern (concat "deadgrep--setter--" (symbol-name name))))
+	(full-target (intern (concat "deadgrep--" (symbol-name target)))))
+    `(defun ,full-name ()
+       ,(format "Setter for `%s'." full-target)
+       (interactive)
+       (setq ,full-target ,value-form)
+       (deadgrep-restart))))
+
 (defun deadgrep--split-line (line)
   "Split out the components of a raw LINE of output from rg.
 Return the filename, line number, and the line content with ANSI
@@ -380,11 +391,9 @@ with Emacs text properties."
   (setq deadgrep--search-type (button-get button 'search-type))
   (deadgrep-restart))
 
-(defun deadgrep--search-type-setter (value)
-  (lambda ()
-    (interactive)
-    (setq deadgrep--search-type value)
-    (deadgrep-restart)))
+(deadgrep--define-setter type/string search-type 'string)
+(deadgrep--define-setter type/words search-type 'words)
+(deadgrep--define-setter type/regexp search-type 'regexp)
 
 (define-button-type 'deadgrep-case
   'action #'deadgrep--case
@@ -395,11 +404,9 @@ with Emacs text properties."
   (setq deadgrep--search-case (button-get button 'case))
   (deadgrep-restart))
 
-(defun deadgrep--case-setter (value)
-  (lambda ()
-    (inteactive)
-    (setq deadgrep--search-case value)
-    (deadgrep-restart)))
+(deadgrep--define-setter case/smart search-case 'smart)
+(deadgrep--define-setter case/sensitive search-case 'sensitive)
+(deadgrep--define-setter case/ignore search-case 'ignore)
 
 (define-button-type 'deadgrep-context
   'action #'deadgrep--context
@@ -421,16 +428,16 @@ with Emacs text properties."
     (t
      (error "Unknown context type"))))
 
+(deadgrep--define-setter context/nil context nil)
+(deadgrep--define-setter context/before context
+  (deadgrep--context-ask-value 'before))
+(deadgrep--define-setter context/after context
+  (deadgrep--context-ask-value 'after))
+
 (defun deadgrep--context (button)
   (setq deadgrep--context
 	(deadgrep--context-ask-value (button-get button 'context)))
   (deadgrep-restart))
-
-(defun deadgrep--context-setter (value)
-  (lambda ()
-    (interactive)
-    (setq deadgrep--context (deadgrep--context-ask-value value))
-    (deadgrep-restart)))
 
 (defun deadgrep--type-list ()
   "Query the rg executable for available file types."
@@ -589,11 +596,11 @@ with Emacs text properties."
 	(deadgrep--file-type-ask (button-get button 'file-type)))
   (deadgrep-restart))
 
-(defun deadgrep--file-type-setter (value)
-  (lambda ()
-    (interactive)
-    (setq deadgrep--file-type (deadgrep--file-type-ask value))
-    (deadgrep-restart)))
+(deadgrep--define-setter file-type/all file-type 'all)
+(deadgrep--define-setter file-type/type file-type
+  (deadgrep--file-type-ask 'type))
+(deadgrep--define-setter file-type/glob file-type
+  (deadgrep--file-type-ask 'glob))
 
 (define-button-type 'deadgrep-directory
   'action #'deadgrep--directory
@@ -902,18 +909,18 @@ Returns a list ordered by the most recently accessed."
 
     (define-key map (kbd "d") #'deadgrep--directory)
     (define-key map (kbd "t") #'deadgrep--search-term)
-    (define-key map (kbd "y s") (deadgrep--search-type-setter 'string))
-    (define-key map (kbd "y w") (deadgrep--search-type-setter 'words))
-    (define-key map (kbd "y r") (deadgrep--search-type-setter 'regexp))
-    (define-key map (kbd "C s") (deadgrep--case-setter 'smart))
-    (define-key map (kbd "C e") (deadgrep--case-setter 'sensitive))
-    (define-key map (kbd "C i") (deadgrep--case-setter 'ignore))
-    (define-key map (kbd "c n") (deadgrep--context-setter nil))
-    (define-key map (kbd "c b") (deadgrep--context-setter 'before))
-    (define-key map (kbd "c a") (deadgrep--context-setter 'after))
-    (define-key map (kbd "f a") (deadgrep--file-type-setter 'all))
-    (define-key map (kbd "f t") (deadgrep--file-type-setter 'type))
-    (define-key map (kbd "f g") (deadgrep--file-type-setter 'glob))
+    (define-key map (kbd "y s") #'deadgrep--setter--type/string)
+    (define-key map (kbd "y w") #'deadgrep--setter--type/words)
+    (define-key map (kbd "y r") #'deadgrep--setter--type/regexp)
+    (define-key map (kbd "C s") #'deadgrep--setter--case/smart)
+    (define-key map (kbd "C e") #'deadgrep--setter--case/sensitive)
+    (define-key map (kbd "C i") #'deadgrep--setter--case/ignore)
+    (define-key map (kbd "c n") #'deadgrep--setter--context/nil)
+    (define-key map (kbd "c b") #'deadgrep--setter--context/before)
+    (define-key map (kbd "c a") #'deadgrep--setter--context/after)
+    (define-key map (kbd "f a") #'deadgrep--setter--file-type/all)
+    (define-key map (kbd "f t") #'deadgrep--setter--file-type/type)
+    (define-key map (kbd "f g") #'deadgrep--setter--file-type/glob)
 
     map)
   "Keymap for `deadgrep-mode'.")
